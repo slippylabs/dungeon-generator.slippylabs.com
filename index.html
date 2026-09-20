@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dungeon Generator // dungeon-generator.slippylabs.com</title>
+<meta name="description" content="Four procedural dungeon algorithms — BSP rooms, cellular caves, drunkard's walk and room accretion — seeded, guaranteed connected, and exportable as JSON, CSV or ASCII. Runs entirely in your browser.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://dungeon-generator.slippylabs.com/">
+<meta property="og:title" content="Dungeon Generator // dungeon-generator.slippylabs.com">
+<meta property="og:description" content="Four procedural dungeon algorithms — BSP rooms, cellular caves, drunkard's walk and room accretion — seeded, guaranteed connected, and exportable as JSON, CSV or ASCII. Runs entirely in your browser.">
+<meta property="og:image" content="https://dungeon-generator.slippylabs.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Dungeon Generator // dungeon-generator.slippylabs.com">
+<meta name="twitter:description" content="Four procedural dungeon algorithms — BSP rooms, cellular caves, drunkard's walk and room accretion — seeded, guaranteed connected, and exportable as JSON, CSV or ASCII. Runs entirely in your browser.">
+<meta name="twitter:image" content="https://dungeon-generator.slippylabs.com/og-image.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2234%22%20r%3D%2222%22%20fill%3D%22%231c8a52%22%20stroke%3D%22%2339ff8f%22%20stroke-width%3D%222%22%2F%3E%3Ccircle%20cx%3D%2220%22%20cy%3D%2216%22%20r%3D%228%22%20fill%3D%22%231c8a52%22%20stroke%3D%22%2339ff8f%22%20stroke-width%3D%222%22%2F%3E%3Ccircle%20cx%3D%2244%22%20cy%3D%2216%22%20r%3D%228%22%20fill%3D%22%231c8a52%22%20stroke%3D%22%2339ff8f%22%20stroke-width%3D%222%22%2F%3E%3C%2Fsvg%3E">
+<meta name="theme-color" content="#050b10">
+<link rel="stylesheet" href="style.css?v=1">
+<script>/* perf-lite: drop blend/blur effects on low-power devices. ?fx=lite or ?fx=full to override (persisted). */
+(function(){try{var k="slippy-fx",m=location.search.match(/[?&]fx=(lite|full)/),v=m?m[1]:localStorage.getItem(k);if(m)localStorage.setItem(k,v);if(v==="lite"||(v!=="full"&&(navigator.hardwareConcurrency||8)<=2))document.documentElement.classList.add("perf-lite");}catch(e){}})();</script>
+</head>
+<body>
+
+<div class="starfield"></div>
+<div class="scanlines"></div>
+
+<main class="page-wrap">
+  <div class="hud-panel wide">
+    <div class="corner tl"></div>
+    <div class="corner tr"></div>
+    <div class="corner bl"></div>
+    <div class="corner br"></div>
+
+    <div class="callsign-row">
+      <div class="toad-avatar-wrap">
+        <svg class="toad-avatar" width="46" height="46" viewBox="0 0 64 64">
+          <circle cx="32" cy="34" r="22" fill="#1c8a52" stroke="#39ff8f" stroke-width="2"/>
+          <circle cx="20" cy="16" r="8" fill="#1c8a52" stroke="#39ff8f" stroke-width="2"/>
+          <circle cx="44" cy="16" r="8" fill="#1c8a52" stroke="#39ff8f" stroke-width="2"/>
+          <circle cx="20" cy="16" r="3.5" fill="#050b10"/>
+          <circle cx="44" cy="16" r="3.5" fill="#050b10"/>
+          <ellipse cx="24" cy="32" rx="4.5" ry="5.5" fill="#050b10"/>
+          <ellipse cx="40" cy="32" rx="4.5" ry="5.5" fill="#050b10"/>
+          <circle cx="24" cy="30" r="1.4" fill="#39ff8f"/>
+          <circle cx="40" cy="30" r="1.4" fill="#39ff8f"/>
+          <path d="M22 42 Q32 48 42 42" stroke="#050b10" stroke-width="2" fill="none" stroke-linecap="round"/>
+        </svg>
+        <div class="lock-reticle"></div>
+      </div>
+      <span class="callsign">Workshop Division // Tool</span>
+      <div class="nav-links">
+        <a href="https://projects.slippylabs.com/" class="logout-link">← Archive</a>
+      </div>
+    </div>
+
+
+    <h1>DUNGEON GENERATOR</h1>
+    <p class="subtitle">Four ways to carve a floor plan out of solid rock, each with a different feel: architecture, erosion, wandering and sprawl. Every one of them is seeded, so a level you like is a number you can keep — and every one is checked for connectivity before you see it, because a dungeon with an unreachable treasure room is a bug report.</p>
+
+    <div class="dg-layout">
+      <div class="dg-canvas-wrap">
+        <canvas id="map" width="720" height="540"></canvas>
+        <div class="dg-hover" id="hover-readout">&nbsp;</div>
+      </div>
+
+      <div class="dg-controls">
+        <div class="tool-field-row">
+          <label class="tool-field-label" for="algo-select">Algorithm</label>
+          <select class="tool-select" id="algo-select">
+            <option value="bsp" selected>BSP rooms &amp; corridors</option>
+            <option value="cave">Cellular caves</option>
+            <option value="drunkard">Drunkard's walk</option>
+            <option value="accretion">Room accretion</option>
+          </select>
+        </div>
+        <div class="tool-field-row">
+          <label class="tool-field-label" for="w-slider">Width — <span id="w-value">72</span></label>
+          <div class="tool-slider-row"><input type="range" id="w-slider" min="24" max="120" step="2" value="72"></div>
+        </div>
+        <div class="tool-field-row">
+          <label class="tool-field-label" for="h-slider">Height — <span id="h-value">54</span></label>
+          <div class="tool-slider-row"><input type="range" id="h-slider" min="18" max="90" step="2" value="54"></div>
+        </div>
+        <div class="tool-field-row">
+          <label class="tool-field-label" for="seed-input">Seed</label>
+          <input class="tool-number-input" id="seed-input" type="number" value="7" min="0" step="1">
+        </div>
+
+        <div id="bsp-panel">
+          <div class="tool-field-row">
+            <label class="tool-field-label" for="depth-slider">Split depth — <span id="depth-value">4</span></label>
+            <div class="tool-slider-row"><input type="range" id="depth-slider" min="1" max="6" step="1" value="4"></div>
+          </div>
+          <div class="tool-field-row">
+            <label class="tool-field-label" for="pad-slider">Room padding — <span id="pad-value">1</span></label>
+            <div class="tool-slider-row"><input type="range" id="pad-slider" min="0" max="4" step="1" value="1"></div>
+          </div>
+        </div>
+
+        <div id="cave-panel" class="hidden">
+          <div class="tool-field-row">
+            <label class="tool-field-label" for="fill-slider">Initial rock — <span id="fill-value">45</span>%</label>
+            <div class="tool-slider-row"><input type="range" id="fill-slider" min="30" max="60" step="1" value="45"></div>
+          </div>
+          <div class="tool-field-row">
+            <label class="tool-field-label" for="smooth-slider">Smoothing passes — <span id="smooth-value">5</span></label>
+            <div class="tool-slider-row"><input type="range" id="smooth-slider" min="0" max="10" step="1" value="5"></div>
+          </div>
+        </div>
+
+        <div id="drunk-panel" class="hidden">
+          <div class="tool-field-row">
+            <label class="tool-field-label" for="cover-slider">Floor coverage — <span id="cover-value">35</span>%</label>
+            <div class="tool-slider-row"><input type="range" id="cover-slider" min="10" max="60" step="1" value="35"></div>
+          </div>
+          <div class="tool-field-row">
+            <label class="tool-field-label" for="inertia-slider">Inertia — <span id="inertia-value">0.70</span></label>
+            <div class="tool-slider-row"><input type="range" id="inertia-slider" min="0" max="0.95" step="0.05" value="0.7"></div>
+          </div>
+        </div>
+
+        <div id="accr-panel" class="hidden">
+          <div class="tool-field-row">
+            <label class="tool-field-label" for="rooms-slider">Rooms to try — <span id="rooms-value">18</span></label>
+            <div class="tool-slider-row"><input type="range" id="rooms-slider" min="4" max="40" step="1" value="18"></div>
+          </div>
+          <div class="tool-field-row">
+            <label class="tool-field-label" for="size-slider">Room size — <span id="size-value">7</span></label>
+            <div class="tool-slider-row"><input type="range" id="size-slider" min="3" max="14" step="1" value="7"></div>
+          </div>
+        </div>
+
+        <div class="tool-field-row">
+          <label class="tool-field-label" for="view-select">View</label>
+          <select class="tool-select" id="view-select">
+            <option value="tiles" selected>Tiles</option>
+            <option value="distance">Distance from spawn</option>
+            <option value="regions">Regions (before repair)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="tool-controls">
+      <button class="tool-btn" id="gen-btn">Generate</button>
+      <button class="tool-btn ghost" id="reroll-btn">Reroll Seed</button>
+      <button class="tool-btn ghost" id="json-btn">Download JSON</button>
+      <button class="tool-btn ghost" id="csv-btn">Download CSV</button>
+      <button class="tool-btn ghost" id="ascii-btn">Copy ASCII</button>
+      <a id="download-link" hidden></a>
+    </div>
+    <div class="copy-toast" id="toast">Copied</div>
+
+    <div class="net-grid">
+      <div class="net-tile"><div class="net-tile-label">Floor tiles</div><div class="net-tile-value" id="stat-floor">—</div></div>
+      <div class="net-tile"><div class="net-tile-label">Rooms</div><div class="net-tile-value" id="stat-rooms">—</div></div>
+      <div class="net-tile"><div class="net-tile-label">Doors</div><div class="net-tile-value" id="stat-doors">—</div></div>
+      <div class="net-tile"><div class="net-tile-label">Regions</div><div class="net-tile-value" id="stat-regions">—</div></div>
+      <div class="net-tile"><div class="net-tile-label">Dead ends</div><div class="net-tile-value" id="stat-deadends">—</div></div>
+      <div class="net-tile"><div class="net-tile-label">Longest path</div><div class="net-tile-value" id="stat-path">—</div></div>
+    </div>
+    <p class="tool-note" id="verdict" role="status"></p>
+    <p class="tool-note">The spawn is the green mark, the exit the orange one — the exit is the floor tile furthest from the spawn by actual walking distance, not by straight line, which is what makes it feel like the end of the level.</p>
+    <div class="comm-window">
+      <div class="comm-portrait">
+        <svg width="36" height="36" viewBox="0 0 64 64">
+          <circle cx="32" cy="34" r="22" fill="#1c8a52" stroke="#39ff8f" stroke-width="2"/>
+          <circle cx="20" cy="16" r="8" fill="#1c8a52" stroke="#39ff8f" stroke-width="2"/>
+          <circle cx="44" cy="16" r="8" fill="#1c8a52" stroke="#39ff8f" stroke-width="2"/>
+          <circle cx="20" cy="16" r="3.5" fill="#050b10"/>
+          <circle cx="44" cy="16" r="3.5" fill="#050b10"/>
+          <ellipse cx="24" cy="32" rx="4.5" ry="5.5" fill="#050b10"/>
+          <ellipse cx="40" cy="32" rx="4.5" ry="5.5" fill="#050b10"/>
+          <circle cx="24" cy="30" r="1.4" fill="#39ff8f"/>
+          <circle cx="40" cy="30" r="1.4" fill="#39ff8f"/>
+          <path d="M22 42 Q32 48 42 42" stroke="#050b10" stroke-width="2" fill="none" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="comm-body">
+        <div class="comm-label"><span class="dot"></span> Incoming Transmission &mdash; Slippy</div>
+        <p>&quot;The hard part was never making rooms. It was proving you can walk to all of them.&quot;</p>
+      </div>
+    </div>
+
+    <a href="https://projects.slippylabs.com/" class="hud-btn">← Back to Archive</a>
+  </div>
+</main>
+
+
+<script>
+/* ---- Dungeons ---------------------------------------------------------------
+   Four generators, one grid. 0 is rock, 1 is floor, 2 is a door.
+
+   Three of the four can produce a disconnected map by nature -- caves island
+   themselves constantly, accretion can reject every bridge, and a badly seeded
+   BSP can leave a corridor sealed. So generation is only half the job: every map
+   goes through the same repair pass, which finds the connected regions and
+   joins them until exactly one remains. The page then re-counts the regions on
+   the FINISHED map and says so on screen, because a generator that claims
+   connectivity and a map that has it are different things. */
+
+const ROCK = 0;
+const FLOOR = 1;
+const DOOR = 2;
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function next() {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function makeGrid(width, height, fill = ROCK) {
+  return { width, height, cells: new Uint8Array(width * height).fill(fill) };
+}
+
+const at = (g, x, y) => g.cells[y * g.width + x];
+const put = (g, x, y, v) => { g.cells[y * g.width + x] = v; };
+const inside = (g, x, y) => x >= 1 && y >= 1 && x < g.width - 1 && y < g.height - 1;
+const walkable = (v) => v !== ROCK;
+
+function carveRect(g, x0, y0, w, h) {
+  for (let y = y0; y < y0 + h; y++) {
+    for (let x = x0; x < x0 + w; x++) if (inside(g, x, y)) put(g, x, y, FLOOR);
+  }
+}
+
+/* An L-shaped corridor. Which leg goes first is a coin flip, or every corridor
+   in the dungeon bends the same way and it reads as a grid. */
+function carveCorridor(g, ax, ay, bx, by, rnd) {
+  const horizontalFirst = rnd() < 0.5;
+  const hx0 = Math.min(ax, bx);
+  const hx1 = Math.max(ax, bx);
+  const vy0 = Math.min(ay, by);
+  const vy1 = Math.max(ay, by);
+  if (horizontalFirst) {
+    for (let x = hx0; x <= hx1; x++) if (inside(g, x, ay)) put(g, x, ay, FLOOR);
+    for (let y = vy0; y <= vy1; y++) if (inside(g, bx, y)) put(g, bx, y, FLOOR);
+  } else {
+    for (let y = vy0; y <= vy1; y++) if (inside(g, ax, y)) put(g, ax, y, FLOOR);
+    for (let x = hx0; x <= hx1; x++) if (inside(g, x, by)) put(g, x, by, FLOOR);
+  }
+}
+
+/* ---- 1. BSP ---------------------------------------------------------------
+   Split the rectangle, recurse, put a room in every leaf, then on the way back
+   up join the two children through their nearest room centres. Connectivity is
+   structural: every subtree is joined to its sibling, so the whole tree is one
+   component before the repair pass ever runs. */
+function generateBSP(opts) {
+  const { width, height, depth, padding, rnd } = opts;
+  const g = makeGrid(width, height);
+  const rooms = [];
+
+  /* The smallest partition worth splitting. A room needs three tiles plus a
+     wall each side, so a leaf under MIN_LEAF cannot hold one -- and a split
+     that produces such a leaf is what makes two rooms overlap on a long thin
+     map: the room gets clamped up to its minimum size and spills across the
+     partition line into its neighbour. Refusing the split is the fix; growing
+     the room to fit is not, because there is nowhere for it to go. */
+  const MIN_LEAF = 6;
+
+  function split(x, y, w, h, level) {
+    if (level === 0 || w < MIN_LEAF * 2 || h < MIN_LEAF * 2) {
+      const maxW = w - 2 - padding * 2;
+      const maxH = h - 2 - padding * 2;
+      if (maxW < 3 || maxH < 3) return null;
+      const rw = 3 + Math.floor(rnd() * (maxW - 2));
+      const rh = 3 + Math.floor(rnd() * (maxH - 2));
+      const rx = x + 1 + padding + Math.floor(rnd() * (maxW - rw + 1));
+      const ry = y + 1 + padding + Math.floor(rnd() * (maxH - rh + 1));
+      const room = { x: rx, y: ry, w: rw, h: rh, cx: Math.floor(rx + rw / 2), cy: Math.floor(ry + rh / 2) };
+      carveRect(g, rx, ry, rw, rh);
+      rooms.push(room);
+      return room;
+    }
+    /* Split the long way, with a jittered cut -- always cutting in half makes
+       every dungeon look like the same dungeon. The cut is then pulled back
+       inside MIN_LEAF of either edge so neither child is unbuildable. */
+    const horizontal = w < h ? true : h < w ? false : rnd() < 0.5;
+    const span = horizontal ? h : w;
+    const cut = Math.min(span - MIN_LEAF, Math.max(MIN_LEAF, Math.floor(span * (0.35 + rnd() * 0.3))));
+    const a = horizontal ? split(x, y, w, cut, level - 1) : split(x, y, cut, h, level - 1);
+    const b = horizontal
+      ? split(x, y + cut, w, h - cut, level - 1)
+      : split(x + cut, y, w - cut, h, level - 1);
+    if (a && b) carveCorridor(g, a.cx, a.cy, b.cx, b.cy, rnd);
+    if (!a) return b;
+    if (!b) return a;
+    return rnd() < 0.5 ? a : b;
+  }
+
+  split(0, 0, width, height, depth);
+  return { grid: g, rooms };
+}
+
+/* ---- 2. Cellular caves -----------------------------------------------------
+   Random rock, then the 4-5 rule: a cell becomes rock if five or more of its
+   nine neighbours are rock. Out-of-bounds counts as rock, which is what keeps
+   the border solid without a special case. */
+function generateCave(opts) {
+  const { width, height, fillPercent, passes, rnd } = opts;
+  let g = makeGrid(width, height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const edge = x === 0 || y === 0 || x === width - 1 || y === height - 1;
+      put(g, x, y, edge || rnd() * 100 < fillPercent ? ROCK : FLOOR);
+    }
+  }
+  for (let p = 0; p < passes; p++) {
+    const next = makeGrid(width, height);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let rock = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) { rock++; continue; }
+            if (at(g, nx, ny) === ROCK) rock++;
+          }
+        }
+        put(next, x, y, rock >= 5 ? ROCK : FLOOR);
+      }
+    }
+    g = next;
+  }
+  for (let x = 0; x < width; x++) { put(g, x, 0, ROCK); put(g, x, height - 1, ROCK); }
+  for (let y = 0; y < height; y++) { put(g, 0, y, ROCK); put(g, width - 1, y, ROCK); }
+  return { grid: g, rooms: [] };
+}
+
+/* ---- 3. Drunkard's walk ----------------------------------------------------
+   One walker, carving as it goes, until the floor covers the requested
+   fraction. Inertia is the chance it keeps its heading; at 0 it is a blob, at
+   0.95 it is corridors. Connected by construction: the walker never teleports. */
+function generateDrunkard(opts) {
+  const { width, height, coverage, inertia, rnd } = opts;
+  const g = makeGrid(width, height);
+  const target = Math.floor((width - 2) * (height - 2) * coverage);
+  let x = Math.floor(width / 2);
+  let y = Math.floor(height / 2);
+  let dir = Math.floor(rnd() * 4);
+  const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  let carved = 0;
+  let guard = 0;
+  put(g, x, y, FLOOR);
+  carved = 1;
+  while (carved < target && guard++ < target * 400) {
+    if (rnd() > inertia) dir = Math.floor(rnd() * 4);
+    const [dx, dy] = DIRS[dir];
+    const nx = x + dx;
+    const ny = y + dy;
+    if (!inside(g, nx, ny)) { dir = Math.floor(rnd() * 4); continue; }
+    x = nx; y = ny;
+    if (at(g, x, y) === ROCK) { put(g, x, y, FLOOR); carved++; }
+  }
+  return { grid: g, rooms: [] };
+}
+
+/* ---- 4. Room accretion -----------------------------------------------------
+   Throw a room at the map; if it does not overlap anything already placed, keep
+   it and run a corridor to the nearest existing room. Rejection sampling, so
+   the room count is a ceiling rather than a promise -- which the readout says.
+   Connected by construction, for the same reason as BSP. */
+function generateAccretion(opts) {
+  const { width, height, attempts, roomSize, rnd } = opts;
+  const g = makeGrid(width, height);
+  const rooms = [];
+  for (let i = 0; i < attempts * 12 && rooms.length < attempts; i++) {
+    const w = 3 + Math.floor(rnd() * roomSize);
+    const h = 3 + Math.floor(rnd() * roomSize);
+    const x = 1 + Math.floor(rnd() * (width - w - 2));
+    const y = 1 + Math.floor(rnd() * (height - h - 2));
+    /* One tile of rock has to survive between rooms or they merge into a blob. */
+    let clear = true;
+    for (let yy = y - 1; yy <= y + h && clear; yy++) {
+      for (let xx = x - 1; xx <= x + w; xx++) {
+        if (xx < 0 || yy < 0 || xx >= width || yy >= height) continue;
+        if (at(g, xx, yy) !== ROCK) { clear = false; break; }
+      }
+    }
+    if (!clear) continue;
+    const room = { x, y, w, h, cx: Math.floor(x + w / 2), cy: Math.floor(y + h / 2) };
+    carveRect(g, x, y, w, h);
+    if (rooms.length > 0) {
+      let nearest = rooms[0];
+      let best = Infinity;
+      for (const other of rooms) {
+        const d = Math.abs(other.cx - room.cx) + Math.abs(other.cy - room.cy);
+        if (d < best) { best = d; nearest = other; }
+      }
+      carveCorridor(g, room.cx, room.cy, nearest.cx, nearest.cy, rnd);
+    }
+    rooms.push(room);
+  }
+  return { grid: g, rooms };
+}
+
+/* ---- Connectivity ----------------------------------------------------------
+   Four-connected flood fill. Diagonal-only links are not walkable in a
+   tile game, so counting them as connected would produce a map that passes the
+   check and traps the player -- 8-connectivity is the classic wrong answer
+   here. */
+function labelRegions(g) {
+  const labels = new Int32Array(g.cells.length).fill(-1);
+  const regions = [];
+  const queue = new Int32Array(g.cells.length);
+  for (let start = 0; start < g.cells.length; start++) {
+    if (!walkable(g.cells[start]) || labels[start] !== -1) continue;
+    const id = regions.length;
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = start;
+    labels[start] = id;
+    const cellsInRegion = [];
+    while (head < tail) {
+      const idx = queue[head++];
+      cellsInRegion.push(idx);
+      const x = idx % g.width;
+      const y = (idx / g.width) | 0;
+      const push = (nx, ny) => {
+        if (nx < 0 || ny < 0 || nx >= g.width || ny >= g.height) return;
+        const n = ny * g.width + nx;
+        if (labels[n] !== -1 || !walkable(g.cells[n])) return;
+        labels[n] = id;
+        queue[tail++] = n;
+      };
+      push(x + 1, y); push(x - 1, y); push(x, y + 1); push(x, y - 1);
+    }
+    regions.push(cellsInRegion);
+  }
+  return { labels, regions };
+}
+
+/* Join everything to the largest region, one tunnel at a time: take the
+   nearest pair of cells between the orphan and the main body and drive a
+   corridor between them. Re-labelling after each join is what makes this
+   terminate at exactly one region rather than nearly one. */
+function repairConnectivity(g, rnd) {
+  let joins = 0;
+  for (let guard = 0; guard < 400; guard++) {
+    const { regions } = labelRegions(g);
+    if (regions.length <= 1) return { joins, regionsBefore: guard === 0 ? regions.length : undefined };
+    regions.sort((a, b) => b.length - a.length);
+    const main = regions[0];
+    const orphan = regions[1];
+    let bestA = main[0];
+    let bestB = orphan[0];
+    let bestD = Infinity;
+    /* Sampling rather than an exhaustive pair scan: a 120x90 map with two big
+       regions is 10^7 pairs, and the nearest of 600 sampled pairs is close
+       enough to dig from. */
+    const sample = (list, n) => {
+      if (list.length <= n) return list;
+      const out = [];
+      for (let i = 0; i < n; i++) out.push(list[Math.floor(rnd() * list.length)]);
+      return out;
+    };
+    for (const a of sample(main, 260)) {
+      const ax = a % g.width;
+      const ay = (a / g.width) | 0;
+      for (const b of sample(orphan, 60)) {
+        const bx = b % g.width;
+        const by = (b / g.width) | 0;
+        const d = Math.abs(ax - bx) + Math.abs(ay - by);
+        if (d < bestD) { bestD = d; bestA = a; bestB = b; }
+      }
+    }
+    carveCorridor(g, bestA % g.width, (bestA / g.width) | 0,
+                  bestB % g.width, (bestB / g.width) | 0, rnd);
+    joins++;
+  }
+  return { joins };
+}
+
+/* Keeping only the largest region is the right repair for caves, where the
+   islands are meant to be solid rock, not the right one for rooms. */
+function keepLargestRegion(g) {
+  const { regions } = labelRegions(g);
+  if (regions.length <= 1) return 0;
+  regions.sort((a, b) => b.length - a.length);
+  let removed = 0;
+  for (let i = 1; i < regions.length; i++) {
+    for (const idx of regions[i]) { g.cells[idx] = ROCK; removed++; }
+  }
+  return removed;
+}
+
+/* ---- Distance, doors, spawn and exit ---------------------------------------- */
+
+function bfsDistance(g, startIdx) {
+  const dist = new Int32Array(g.cells.length).fill(-1);
+  if (!walkable(g.cells[startIdx])) return dist;
+  const queue = new Int32Array(g.cells.length);
+  let head = 0;
+  let tail = 0;
+  queue[tail++] = startIdx;
+  dist[startIdx] = 0;
+  while (head < tail) {
+    const idx = queue[head++];
+    const x = idx % g.width;
+    const y = (idx / g.width) | 0;
+    const push = (nx, ny) => {
+      if (nx < 0 || ny < 0 || nx >= g.width || ny >= g.height) return;
+      const n = ny * g.width + nx;
+      if (dist[n] !== -1 || !walkable(g.cells[n])) return;
+      dist[n] = dist[idx] + 1;
+      queue[tail++] = n;
+    };
+    push(x + 1, y); push(x - 1, y); push(x, y + 1); push(x, y - 1);
+  }
+  return dist;
+}
+
+/* The two ends of the longest shortest path, found the standard way: BFS from
+   anywhere to find one end, then BFS from there to find the other. For a graph
+   with cycles this is a heuristic rather than the true diameter, and the page
+   says "longest path found", not "diameter". */
+function farthestPair(g) {
+  const first = g.cells.findIndex(walkable);
+  if (first < 0) return null;
+  const d1 = bfsDistance(g, first);
+  let a = first;
+  for (let i = 0; i < d1.length; i++) if (d1[i] > d1[a]) a = i;
+  const d2 = bfsDistance(g, a);
+  let b = a;
+  for (let i = 0; i < d2.length; i++) if (d2[i] > d2[b]) b = i;
+  return { a, b, length: d2[b], dist: d2 };
+}
+
+/* A door is a corridor tile that touches a room -- the threshold, not the room
+   side of it. Marking the room tile instead puts the door inside the room,
+   which looks fine on a map and breaks every "am I in a room" test downstream. */
+function markDoors(g, rooms) {
+  if (!rooms.length) return 0;
+  const inRoom = new Uint8Array(g.cells.length);
+  for (const r of rooms) {
+    for (let y = r.y; y < r.y + r.h; y++) {
+      for (let x = r.x; x < r.x + r.w; x++) {
+        if (x >= 0 && y >= 0 && x < g.width && y < g.height) inRoom[y * g.width + x] = 1;
+      }
+    }
+  }
+  let doors = 0;
+  for (let y = 1; y < g.height - 1; y++) {
+    for (let x = 1; x < g.width - 1; x++) {
+      const idx = y * g.width + x;
+      if (g.cells[idx] !== FLOOR || inRoom[idx]) continue;
+      let touches = 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const n = (y + dy) * g.width + (x + dx);
+        if (inRoom[n] && walkable(g.cells[n])) touches++;
+      }
+      if (touches > 0) { g.cells[idx] = DOOR; doors++; }
+    }
+  }
+  return doors;
+}
+
+function countDeadEnds(g) {
+  let n = 0;
+  for (let y = 1; y < g.height - 1; y++) {
+    for (let x = 1; x < g.width - 1; x++) {
+      if (!walkable(at(g, x, y))) continue;
+      let open = 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (walkable(at(g, x + dx, y + dy))) open++;
+      }
+      if (open === 1) n++;
+    }
+  }
+  return n;
+}
+
+/* ---- The whole pipeline ----------------------------------------------------- */
+
+function generate(config) {
+  const rnd = mulberry32(config.seed);
+  const opts = { ...config, rnd };
+  let result;
+  switch (config.algorithm) {
+    case 'cave': result = generateCave(opts); break;
+    case 'drunkard': result = generateDrunkard(opts); break;
+    case 'accretion': result = generateAccretion(opts); break;
+    default: result = generateBSP(opts); break;
+  }
+  const g = result.grid;
+  const before = labelRegions(g).regions.length;
+
+  /* Caves lose their islands; everything else gets tunnelled together, because
+     an orphaned ROOM is a level design mistake but an orphaned CAVE pocket is
+     just rock. */
+  let removed = 0;
+  let joins = 0;
+  if (config.algorithm === 'cave') removed = keepLargestRegion(g);
+  else joins = repairConnectivity(g, rnd).joins;
+
+  /* Rooms that the cave repair deleted are no longer rooms. */
+  const rooms = result.rooms.filter((r) => at(g, r.cx, r.cy) !== ROCK);
+  const doors = markDoors(g, rooms);
+  const ends = farthestPair(g);
+  const after = labelRegions(g).regions.length;
+
+  let floor = 0;
+  for (const c of g.cells) if (walkable(c)) floor++;
+
+  return {
+    grid: g, rooms, doors, floor,
+    regionsBefore: before,
+    regionsAfter: after,
+    removed, joins,
+    spawn: ends ? ends.a : null,
+    exit: ends ? ends.b : null,
+    pathLength: ends ? ends.length : 0,
+    distance: ends ? ends.dist : null,
+    deadEnds: countDeadEnds(g),
+    connected: after === 1,
+    config: { ...config },
+  };
+}
+
+/* ---- Export ---------------------------------------------------------------- */
+
+const ASCII = { [ROCK]: '#', [FLOOR]: '.', [DOOR]: '+' };
+
+function toAscii(map) {
+  const g = map.grid;
+  const rows = [];
+  for (let y = 0; y < g.height; y++) {
+    let row = '';
+    for (let x = 0; x < g.width; x++) {
+      const idx = y * g.width + x;
+      if (idx === map.spawn) row += '@';
+      else if (idx === map.exit) row += '>';
+      else row += ASCII[g.cells[idx]];
+    }
+    rows.push(row);
+  }
+  return rows.join('\n');
+}
+
+function toCsv(map) {
+  const g = map.grid;
+  const rows = [];
+  for (let y = 0; y < g.height; y++) {
+    rows.push(Array.from(g.cells.subarray(y * g.width, (y + 1) * g.width)).join(','));
+  }
+  return rows.join('\n');
+}
+
+function toJson(map) {
+  const g = map.grid;
+  const rows = [];
+  for (let y = 0; y < g.height; y++) rows.push(Array.from(g.cells.subarray(y * g.width, (y + 1) * g.width)));
+  return {
+    generator: 'dungeon-generator.slippylabs.com',
+    algorithm: map.config.algorithm,
+    seed: map.config.seed,
+    width: g.width,
+    height: g.height,
+    legend: { 0: 'rock', 1: 'floor', 2: 'door' },
+    connected: map.connected,
+    spawn: map.spawn === null ? null : { x: map.spawn % g.width, y: (map.spawn / g.width) | 0 },
+    exit: map.exit === null ? null : { x: map.exit % g.width, y: (map.exit / g.width) | 0 },
+    pathLength: map.pathLength,
+    rooms: map.rooms.map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h })),
+    tiles: rows,
+  };
+}
+
+/* ==== UI ==== */
+
+const $ = (id) => document.getElementById(id);
+const canvas = $('map');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+const state = {
+  algorithm: 'bsp', width: 72, height: 54, seed: 7,
+  depth: 4, padding: 1, fillPercent: 45, passes: 5,
+  coverage: 0.35, inertia: 0.7, attempts: 18, roomSize: 7,
+  view: 'tiles',
+};
+
+let map = null;
+let regionsSnapshot = null;
+
+const PANELS = { bsp: 'bsp-panel', cave: 'cave-panel', drunkard: 'drunk-panel', accretion: 'accr-panel' };
+
+function config() {
+  return {
+    algorithm: state.algorithm, width: state.width, height: state.height, seed: state.seed,
+    depth: state.depth, padding: state.padding, fillPercent: state.fillPercent,
+    passes: state.passes, coverage: state.coverage, inertia: state.inertia,
+    attempts: state.attempts, roomSize: state.roomSize,
+  };
+}
+
+function build() {
+  const cfg = config();
+  /* The regions view wants the map as it was BEFORE repair, so it is generated
+     a second time with the repair skipped -- same seed, same map. */
+  const rnd = mulberry32(cfg.seed);
+  const raw = cfg.algorithm === 'cave' ? generateCave({ ...cfg, rnd })
+    : cfg.algorithm === 'drunkard' ? generateDrunkard({ ...cfg, rnd })
+      : cfg.algorithm === 'accretion' ? generateAccretion({ ...cfg, rnd })
+        : generateBSP({ ...cfg, rnd });
+  regionsSnapshot = labelRegions(raw.grid);
+
+  map = generate(cfg);
+  draw();
+  refreshStats();
+}
+
+const COLOURS = {
+  [ROCK]: '#0a1410',
+  [FLOOR]: '#1f4a38',
+  [DOOR]: '#8a6a1c',
+};
+
+function draw() {
+  if (!map) return;
+  const g = map.grid;
+  const cell = Math.max(2, Math.floor(Math.min(canvas.width / g.width, canvas.height / g.height)));
+  const offX = Math.floor((canvas.width - cell * g.width) / 2);
+  const offY = Math.floor((canvas.height - cell * g.height) / 2);
+  ctx.fillStyle = '#04070a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const maxDist = map.distance ? Math.max(...map.distance) : 1;
+
+  for (let y = 0; y < g.height; y++) {
+    for (let x = 0; x < g.width; x++) {
+      const idx = y * g.width + x;
+      const v = g.cells[idx];
+      let colour = COLOURS[v];
+      if (state.view === 'distance' && walkable(v) && map.distance) {
+        const d = map.distance[idx];
+        const t = d < 0 ? 0 : d / Math.max(1, maxDist);
+        /* green -> orange -> red, so "far" reads as "deep in". */
+        const r = Math.round(40 + t * 215);
+        const gr = Math.round(230 - t * 180);
+        colour = `rgb(${r},${gr},70)`;
+      } else if (state.view === 'regions' && regionsSnapshot) {
+        const label = regionsSnapshot.labels[idx];
+        if (label < 0) colour = COLOURS[ROCK];
+        else {
+          const hue = (label * 67) % 360;
+          colour = `hsl(${hue}, 65%, ${label === 0 ? 45 : 38}%)`;
+        }
+      }
+      ctx.fillStyle = colour;
+      ctx.fillRect(offX + x * cell, offY + y * cell, cell, cell);
+    }
+  }
+
+  if (state.view === 'tiles' && map.spawn !== null) {
+    const mark = (idx, colour) => {
+      const x = idx % g.width;
+      const y = (idx / g.width) | 0;
+      ctx.fillStyle = colour;
+      ctx.fillRect(offX + x * cell - 1, offY + y * cell - 1, cell + 2, cell + 2);
+    };
+    mark(map.spawn, '#39ff8f');
+    mark(map.exit, '#ff9130');
+  }
+}
+
+function refreshStats() {
+  $('stat-floor').textContent = `${map.floor} (${((map.floor / (map.grid.width * map.grid.height)) * 100).toFixed(1)}%)`;
+  $('stat-rooms').textContent = map.rooms.length ? String(map.rooms.length) : '—';
+  $('stat-doors').textContent = String(map.doors);
+  $('stat-regions').textContent = String(map.regionsAfter);
+  $('stat-deadends').textContent = String(map.deadEnds);
+  $('stat-path').textContent = `${map.pathLength} tiles`;
+
+  const bits = [];
+  if (map.regionsBefore > 1) {
+    bits.push(map.config.algorithm === 'cave'
+      ? `The raw cave came out in ${map.regionsBefore} pieces; the ${map.removed} tiles not in the largest were filled back in.`
+      : `The raw map came out in ${map.regionsBefore} pieces, joined by ${map.joins} tunnel${map.joins === 1 ? '' : 's'}.`);
+  } else {
+    bits.push('The generator produced a single connected map with no repair needed.');
+  }
+  bits.push(map.connected
+    ? `Re-checked on the finished map: ${map.regionsAfter} region — every floor tile is reachable from the spawn.`
+    : `WARNING: the finished map still has ${map.regionsAfter} regions.`);
+  $('verdict').textContent = bits.join(' ');
+  $('verdict').classList.toggle('dg-bad', !map.connected);
+}
+
+/* ---- wiring ---- */
+
+const SLIDERS = [
+  ['w-slider', 'w-value', 'width', (v) => String(v), Number],
+  ['h-slider', 'h-value', 'height', (v) => String(v), Number],
+  ['depth-slider', 'depth-value', 'depth', (v) => String(v), Number],
+  ['pad-slider', 'pad-value', 'padding', (v) => String(v), Number],
+  ['fill-slider', 'fill-value', 'fillPercent', (v) => String(v), Number],
+  ['smooth-slider', 'smooth-value', 'passes', (v) => String(v), Number],
+  ['cover-slider', 'cover-value', 'coverage', (v) => String(Math.round(v * 100)), (s) => Number(s) / 100],
+  ['inertia-slider', 'inertia-value', 'inertia', (v) => v.toFixed(2), Number],
+  ['rooms-slider', 'rooms-value', 'attempts', (v) => String(v), Number],
+  ['size-slider', 'size-value', 'roomSize', (v) => String(v), Number],
+];
+for (const [slider, label, key, format, parse] of SLIDERS) {
+  $(slider).addEventListener('input', () => {
+    state[key] = parse($(slider).value);
+    $(label).textContent = format(state[key]);
+    build();
+  });
+}
+
+$('algo-select').addEventListener('change', () => {
+  state.algorithm = $('algo-select').value;
+  for (const [algo, panel] of Object.entries(PANELS)) {
+    $(panel).classList.toggle('hidden', algo !== state.algorithm);
+  }
+  build();
+});
+$('view-select').addEventListener('change', () => { state.view = $('view-select').value; draw(); });
+$('seed-input').addEventListener('input', () => {
+  state.seed = Math.max(0, Math.floor(Number($('seed-input').value) || 0));
+  build();
+});
+$('gen-btn').addEventListener('click', build);
+$('reroll-btn').addEventListener('click', () => {
+  state.seed = Math.floor(Math.random() * 100000);
+  $('seed-input').value = String(state.seed);
+  build();
+});
+
+canvas.addEventListener('pointermove', (ev) => {
+  if (!map) return;
+  const g = map.grid;
+  const rect = canvas.getBoundingClientRect();
+  const cell = Math.max(2, Math.floor(Math.min(canvas.width / g.width, canvas.height / g.height)));
+  const offX = Math.floor((canvas.width - cell * g.width) / 2);
+  const offY = Math.floor((canvas.height - cell * g.height) / 2);
+  const px = ((ev.clientX - rect.left) / rect.width) * canvas.width;
+  const py = ((ev.clientY - rect.top) / rect.height) * canvas.height;
+  const x = Math.floor((px - offX) / cell);
+  const y = Math.floor((py - offY) / cell);
+  if (x < 0 || y < 0 || x >= g.width || y >= g.height) { $('hover-readout').innerHTML = '&nbsp;'; return; }
+  const idx = y * g.width + x;
+  const names = { [ROCK]: 'rock', [FLOOR]: 'floor', [DOOR]: 'door' };
+  const d = map.distance ? map.distance[idx] : -1;
+  $('hover-readout').textContent = `(${x}, ${y}) ${names[g.cells[idx]]}${d >= 0 ? ` — ${d} tiles from spawn` : ''}`;
+});
+canvas.addEventListener('pointerleave', () => { $('hover-readout').innerHTML = '&nbsp;'; });
+
+function download(name, text, type) {
+  const link = $('download-link');
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+$('json-btn').addEventListener('click', () => {
+  download(`dungeon-${state.algorithm}-${state.seed}.json`, JSON.stringify(toJson(map)), 'application/json');
+});
+$('csv-btn').addEventListener('click', () => {
+  download(`dungeon-${state.algorithm}-${state.seed}.csv`, toCsv(map), 'text/csv');
+});
+
+function toast(msg) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 1400);
+}
+$('ascii-btn').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(toAscii(map));
+    toast('ASCII copied');
+  } catch (err) { toast('Clipboard blocked'); }
+});
+
+window.__dungeon = {
+  generate, labelRegions, bfsDistance, farthestPair, markDoors, repairConnectivity,
+  keepLargestRegion, toAscii, toCsv, toJson, countDeadEnds,
+  set(opts) {
+    Object.assign(state, opts);
+    for (const [slider, label, key, format] of SLIDERS) {
+      if (key === 'coverage') $(slider).value = String(state[key]);
+      else $(slider).value = String(state[key]);
+      $(label).textContent = format(state[key]);
+    }
+    $('algo-select').value = state.algorithm;
+    $('seed-input').value = String(state.seed);
+    $('view-select').value = state.view;
+    for (const [algo, panel] of Object.entries(PANELS)) {
+      $(panel).classList.toggle('hidden', algo !== state.algorithm);
+    }
+    build();
+    return { connected: map.connected, floor: map.floor, rooms: map.rooms.length };
+  },
+  get map() { return map; },
+  get ascii() { return toAscii(map); },
+};
+
+/* ---- boot ---- */
+build();
+</script>
+<!-- Slippy Deck: floating Slippy TV + jukebox player. Renders nothing unless admin.slippylabs.com/whoami confirms a signed-in account. -->
+<script defer src="https://slippylabs.com/deck/deck.js"></script>
+<!-- Slippy Labs sitewide privacy link. Self-contained on purpose: these sites
+     share no CSS, so it carries its own styles and inherits the page's text
+     colour instead of assuming a palette. position/z-index are load bearing --
+     the HUD theme's .starfield/.scanlines are fixed at z-index 0-1 and would
+     paint straight over an unpositioned footer.
+     The .page-wrap trim below is what keeps the bar on the first screen. -->
+<div class="sl-legal"><a href="https://slippylabs.com/privacy.html">Privacy</a></div>
+<style>
+.sl-legal{box-sizing:border-box;position:relative;z-index:3;height:64px;display:flex;align-items:center;justify-content:center;margin:0;padding:0 12px;font-family:"Consolas","SFMono-Regular",Menlo,Monaco,"Courier New",monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.5}
+.sl-legal a{color:inherit;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 14px}
+.sl-legal a:hover,.sl-legal a:focus-visible{text-decoration:underline;opacity:1}
+/* This page centres .page-wrap at min-height:100vh, which would push the bar a
+   whole screen below the fold. Give back exactly the bar height instead of
+   adding a scrollbar to a page that had none. */
+.page-wrap{min-height:calc(100vh - 64px)}
+</style>
+</body>
+</html>
